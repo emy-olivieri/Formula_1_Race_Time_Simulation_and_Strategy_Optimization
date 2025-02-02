@@ -18,7 +18,9 @@ class Run:
     Orchestrates a race simulation for a given season, location, and data.
     """
 
-    def __init__(self, season: int, gp_location: str, dataframes: dict):
+    def __init__(self, season: int, gp_location: str, dataframes: dict, driver_strategies=None):
+
+
         """
         Args:
             season (int): The racing season (year).
@@ -44,7 +46,7 @@ class Run:
                      "lap_time", "cumulative_lap_time", "status"]
         )
 
-        self._initialize_parameters()
+        self._initialize_parameters(driver_strategies)
 
     def run(self):
         """
@@ -204,29 +206,31 @@ class Run:
             if drv == driver:
                 driver.position = idx
 
-    def _initialize_parameters(self):
+    def _initialize_parameters(self, driver_strategies):
         """
-        Retrieve the race ID, total planned laps, build a starting grid
-        from qualifyings, and create Driver objects.
+        Initialise la course, détermine les pilotes participants et leur stratégie.
         """
+        # Pour éviter les erreurs si driver_strategies est None
+        if driver_strategies is None:
+            driver_strategies = {}
+
         races_df = self.dataframes["races"]
         qualifyings_df = self.dataframes["qualifyings"]
 
-        # Find the relevant race row
+        # Récupération de la course en fonction de la saison & location
         race_row = races_df[
             (races_df["season"] == self.season)
             & (races_df["location"] == self.gp_location)
         ]
         if race_row.empty:
             raise ValueError(
-                f"No race found for location '{self.gp_location}' "
-                f"in season {self.season}."
+                f"No race found for location '{self.gp_location}' in season {self.season}."
             )
 
         self.race_id = race_row["id"].iloc[0]
         self.number_of_laps = race_row.iloc[0]["nolapsplanned"]
 
-        # Build the starting grid from qualifying results
+        # Construction de la grille de départ depuis les qualifs
         merged_data = qualifyings_df.merge(
             races_df,
             left_on="race_id",
@@ -239,29 +243,33 @@ class Run:
         ]
         if qualifying_rows.empty:
             raise ValueError(
-                f"No qualifying data found for '{self.gp_location}' "
-                f"in season {self.season}."
+                f"No qualifying data found for '{self.gp_location}' in season {self.season}."
             )
 
         sorted_rows = qualifying_rows.sort_values(by="position")
-        self.starting_grid = list(
-            zip(sorted_rows["driver_id"], sorted_rows["position"])
-        )
+        self.starting_grid = list(zip(sorted_rows["driver_id"], sorted_rows["position"]))
 
-        # Instantiate each driver
+        # On instancie les Driver
         drivers_df = self.dataframes["drivers"]
         driver_ids = sorted_rows["driver_id"].unique().tolist()
+
         for d_id in driver_ids:
             driver_row = drivers_df[drivers_df["id"] == d_id]
             if driver_row.empty:
                 continue
+
             driver_name = driver_row.iloc[0]["name"]
+
+            # On récupère la stratégie pour ce pilote depuis le dictionnaire
+            # Si le nom du pilote n'y est pas, on envoie un dict vide.
+            strategy_for_this_driver = driver_strategies.get(driver_name, {})
 
             driver_obj = Driver(
                 season=self.season,
                 race_id=self.race_id,
                 dataframes=self.dataframes,
                 name=driver_name,
+                strategy=strategy_for_this_driver,  # On passe la stratégie ici
             )
             self.drivers_list.append(driver_obj)
 

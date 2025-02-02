@@ -21,7 +21,7 @@ class Driver:
     and logic for simulation (pit stops, DNF, etc.).
     """
 
-    def __init__(self, season: int, race_id: int, dataframes: dict, name: str):
+    def __init__(self, season: int, race_id: int, dataframes: dict, name: str, strategy):
         """
         Initialize the driver with the provided information and models.
 
@@ -49,7 +49,10 @@ class Driver:
         self.next_pit_stop = 1
 
         # Pit stop strategy
-        self.pit_stops_info = {
+        if strategy :
+            self.pit_stops_info = strategy
+        else: 
+            self.pit_stops_info = {
             1: {
                 "compound": "A2",
                 "pitstop_interval": [10, 20],
@@ -61,7 +64,6 @@ class Driver:
                 "pit_stop_lap": 30,
             },
         }
-
         # DNF attributes
         self.accident_dnf_probability = None
         self.failure_dnf_probability = None

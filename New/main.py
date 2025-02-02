@@ -15,11 +15,45 @@ def main():
     data_loader = DataLoader(db_path=db_path)
     dataframes = data_loader.load_data()
 
-    season = 2019
+    driver_strategies = {
+        "Lewis Hamilton": {
+            1: {
+                "compound": "A2",
+                "pitstop_interval": [10, 15],
+                "pit_stop_lap": 12
+            },
+            2: {
+                "compound": "A3",
+                "pitstop_interval": [25, 35],
+                "pit_stop_lap": 30
+            },
+        },
+        "Max Verstappen": {
+            1: {
+                "compound": "A3",
+                "pitstop_interval": [8, 18],
+                "pit_stop_lap": 10
+            },
+            2: {
+                "compound": "A2",
+                "pitstop_interval": [20, 35],
+                "pit_stop_lap": 25
+            }
+        },
+    }
+    season = 2016
     gp_location = "SaoPaulo"
-    race_run = Run(season=season, gp_location=gp_location, dataframes=dataframes)
-    race_run.run()
+    race_run = race_run = Run(
+        season=season,
+        gp_location=gp_location,
+        dataframes=dataframes,
+        driver_strategies=driver_strategies
+    )
     
+    race_run.run()
+    drivers_names=[drv.name for drv in race_run.drivers_list ]
+
+    print(drivers_names)
     print("\n=== DNF Drivers ===")
     dnf_drivers = [drv for drv in race_run.drivers_list if not drv.alive]
     if not dnf_drivers:
