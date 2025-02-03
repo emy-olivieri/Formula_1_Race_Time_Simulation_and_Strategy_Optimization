@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+## Add tire_age in pit_stop_strategy option to take 
+## into account not new tires
+
 """
 driver.py
 
@@ -43,27 +46,18 @@ class Driver:
         self.best_qualif_time= None
         self.current_lap_time = None
         self.cumulative_lap_time = 0
-        self.compound = "A2"
-        self.tire_age = 0
+
         self.fuelc = 100
         self.next_pit_stop = 1
-
         # Pit stop strategy
         if strategy :
             self.pit_stops_info = strategy
         else: 
-            self.pit_stops_info = {
-            1: {
-                "compound": "A2",
-                "pitstop_interval": [10, 20],
-                "pit_stop_lap": 15,
-            },
-            2: {
-                "compound": "A2",
-                "pitstop_interval": [25, 35],
-                "pit_stop_lap": 30,
-            },
-        }
+            self.pit_stops_info = None
+                            
+        self.compound = self.pit_stops_info["starting_compound"]
+        self.tire_age = self.pit_stops_info["starting_tire_age"]
+
         # DNF attributes
         self.accident_dnf_probability = None
         self.failure_dnf_probability = None

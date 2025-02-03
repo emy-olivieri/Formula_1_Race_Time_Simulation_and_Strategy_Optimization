@@ -1,25 +1,55 @@
-# -*- coding: utf-8 -*-
-"""
-main.py
-
-Entry point to test the updated Run class: 
-- driver retirements determined by simulate_dnf_lap(driver),
-- safety car possibly deployed for 5 laps after each retirement with p=0.2
-"""
-## Possible locations :
-## ['Melbourne' 'KualaLumpur' 'Sakhir' 'Shanghai' 'Catalunya' 'MonteCarlo'
-##  'Montreal' 'Spielberg' 'Silverstone' 'Hockenheim' 'Budapest' 'Spa'
-##  'Monza' 'Singapore' 'Suzuka' 'Sochi' 'Austin' 'SaoPaulo' 'YasMarina'
-##  'MexicoCity' 'Baku' 'LeCastellet']
-
-from data_loader import DataLoader
+import numpy as np
 from run import Run
+from data_loader import DataLoader
 
-def main():
+class MonteCarloSimulator:
+    """
+    Monte Carlo Simulation for F1 race modeling.
+    Runs multiple simulations to assess variability in race outcomes.
+    """
+    def __init__(self, season, gp_location, db_path,driver_strategies, num_simulations=1000):
+        """
+        Initialize the Monte Carlo simulator.
+
+        Args:
+            season (int): The racing season (year).
+            gp_location (str): Grand Prix location.
+            db_path (str): Path to the SQLite database.
+            num_simulations (int): Number of Monte Carlo iterations.
+        """
+        self.season = season
+        self.driver_strategies=driver_strategies
+        self.gp_location = gp_location
+        self.num_simulations = num_simulations
+        self.db_path = db_path
+        self.data_loader = DataLoader(db_path=self.db_path)
+        self.dataframes = self.data_loader.load_data()
+        self.results = []
+
+    def run_simulation(self):
+        """
+        Execute multiple race simulations and store results.
+        """
+        for _ in range(self.num_simulations):
+            race_run = Run(season=self.season, gp_location=self.gp_location, dataframes=self.dataframes,driver_strategies=self.driver_strategies)
+            race_run.run()
+            self.results.append(race_run.laps_summary.copy())
+        
+    def analyze_results(self):
+        """
+        Analyze the results of the Monte Carlo simulations.
+        Returns mean finishing positions and variability.
+        """
+        
+
+    def summarize(self):
+        """
+        Print a summary of the Monte Carlo simulation results.
+        """
+        
+        
+if __name__ == "__main__":
     db_path = "F1_timingdata_2014_2019.sqlite"
-    data_loader = DataLoader(db_path=db_path)
-    dataframes = data_loader.load_data()
-
     season = 2016
     driver_strategies={'Lewis Hamilton': {'starting_compound': 'A3',
   'starting_tire_age': 2,
@@ -237,34 +267,8 @@ def main():
    'pit_stop_lap': 44,
    'tire_age': 18}}}
     gp_location = "Austin"
+    num_simulations = 2
     
-
-    race_run = race_run = Run(
-        season=season,
-        gp_location=gp_location,
-        dataframes=dataframes,
-        driver_strategies=driver_strategies
-    )
-    
-    race_run.run()
-    drivers_names=[drv.name for drv in race_run.drivers_list ]
-
-    print(drivers_names)
-    print("\n=== DNF Drivers ===")
-    dnf_drivers = [drv for drv in race_run.drivers_list if not drv.alive]
-    if not dnf_drivers:
-        print("No drivers retired (DNF).")
-    else:
-        for drv in dnf_drivers:
-            print(f"Driver: {drv.name}, DNF lap: {drv.earliest_dnf_lap}")
-
-    # Print the summary and safety car laps
-    print("\n=== Laps Summary ===")
-    print(race_run.laps_summary)
-    print("\nSafety Car Laps:", sorted(race_run.safety_car_laps))
-
-    # Print DNF
-    print(race_run.laps_summary[race_run.laps_summary["status"]!="running"])
-    print(race_run.laps_summary[race_run.laps_summary["cumulative_lap_time"]>7000])
-if __name__ == "__main__":
-    main()
+    simulator = MonteCarloSimulator(season, gp_location, db_path,driver_strategies, num_simulations)
+    simulator.run_simulation()
+    simulator.summarize()

@@ -184,7 +184,7 @@ class Run:
                     pit_stop_obj.calculate_best_pit_stop_duration()
                     calculated_duration = pit_stop_obj.calculate_pit_stop_duration()
 
-                    driver.tire_age = 0
+                    driver.tire_age =  pit_stop_data["tire_age"]
                     driver.compound = pit_stop_data["compound"]
                     driver.next_pit_stop += 1
 

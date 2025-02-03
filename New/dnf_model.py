@@ -11,7 +11,7 @@ from model import Model
 
 class DNFModel(Model):
     """
-    Example class for returning DNF-related probabilities per driver and season.
+    DNF-related probabilities per driver and season.
     Inherits from the abstract `Model` base class.
     """
 
@@ -24,8 +24,8 @@ class DNFModel(Model):
         self.dfs_local = {n: df.copy() for n, df in dataframes.items()}
 
         # We might store probabilities after fit
-        self.accident_probability = 0.2
-        self.failure_probability = 0.2
+        self.accident_probability = None
+        self.failure_probability = None
         self.is_fitted = False
 
     def fit(self, driver, season):
@@ -36,11 +36,7 @@ class DNFModel(Model):
         self.driver = driver
         self.team = self.driver.team
         self.season = season
-
-        # TODO: Potentially do a DB lookup or other logic for real usage
-        # We'll keep the probabilities at 0.2 / 0.2 as placeholders
-
-
+        
         ### Instanciate dataframe needed and quick cleaning
         races_df = self.dfs_local["races"]
         starterfields_df = self.dfs_local["starterfields"]
@@ -97,7 +93,7 @@ class DNFModel(Model):
         dnf_failure_df['alpha_posterior'] = dnf_failure_df['total_failure'] + alpha_failure
         dnf_failure_df['beta_posterior'] = dnf_failure_df['count_of_race'] - dnf_failure_df['total_failure'] + beta_failure
 
-        ### Finally we can have the probability of accident by taking the expected value of the posterior distribution
+        ### The probability of accident is given by taking the expected value of the posterior distribution
         dnf_failure_df['failure_proba'] = dnf_failure_df['alpha_posterior'] / (dnf_failure_df['alpha_posterior'] + dnf_failure_df['beta_posterior'])
 
         self.accident_probability = dnf_accident_df[dnf_accident_df.index==self.driver.driver_id]['accident_proba'].iloc[0]
