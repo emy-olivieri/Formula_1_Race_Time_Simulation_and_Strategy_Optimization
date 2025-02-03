@@ -84,9 +84,9 @@ class Driver:
         Retrieve driver/team info, DNF probabilities, and
         build the FuelAndTireModel for the driver.
         """
-        drivers_df = self.dataframes["drivers"]
-        starterfields_df = self.dataframes["starterfields"]
-        races_df = self.dataframes["races"]
+        drivers_df = self.dataframes["drivers"].copy()
+        starterfields_df = self.dataframes["starterfields"].copy()
+        races_df = self.dataframes["races"].copy()
 
         # Find driver ID
         driver_row = drivers_df[drivers_df["name"] == self.name]
@@ -133,8 +133,8 @@ class Driver:
             self.team = TeamRegistry.get_team(team_name)
 
         # 1) DNFModel usage
-        dnf_model = DNFModel()
-        dnf_model.fit(driver_name=self.name, season=self.season)
+        dnf_model = DNFModel(self.dataframes)
+        dnf_model.fit(driver=self, season=self.season)
         (acc_prob, fail_prob) = dnf_model.predict()
         self.accident_dnf_probability = acc_prob
         self.failure_dnf_probability = fail_prob
