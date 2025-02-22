@@ -266,5 +266,8 @@ def main():
     # Print DNF
     print(race_run.laps_summary[race_run.laps_summary["status"]!="running"])
     print(race_run.laps_summary[race_run.laps_summary["cumulative_lap_time"]>7000])
+
+    # Outcomes :
+    print(race_run.outcomes)
 if __name__ == "__main__":
     main()

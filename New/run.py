@@ -19,8 +19,6 @@ class Run:
     """
 
     def __init__(self, season: int, gp_location: str, dataframes: dict, driver_strategies=None):
-
-
         """
         Args:
             season (int): The racing season (year).
@@ -32,59 +30,59 @@ class Run:
         self.race_id = None
         self.dataframes = dataframes
 
-        # Example safety car laps (could be configurable)
-        self.safety_car_laps =  []
+        self.safety_car_laps = []
 
         self.number_of_laps = None
         self.drivers_list = []
         self.starting_grid = None
 
-        # Summaries of laps, including status (running / DNF)
         self.laps_summary = pd.DataFrame(
             columns=["lap", "driver_id", "position",
-            
                      "lap_time", "cumulative_lap_time", "status"]
         )
 
+        # Ce dictionnaire (ou DataFrame) sera rempli à la fin de la course
+        # et contiendra pour chaque pilote le temps total et la position finale.
+        self.outcomes = {}
         self._initialize_parameters(driver_strategies)
 
     def run(self):
         """
-        Simulate the race from lap 1 to number_of_laps.
-        For each lap:
-            - Update driver status (DNF or alive)
-            - Compute lap time (with possible pit stop)
-            - Update positions
-            - Record the results in laps_summary
-        """
+        Simule la course de la première à la dernière boucle.
+        Pour chaque tour :
+            - Mise à jour du statut du pilote (DNF ou en course)
+            - Calcul du temps de tour (avec éventuel arrêt aux stands)
+            - Mise à jour des positions
+            - Enregistrement des résultats dans laps_summary
 
-        #    This function modifies self.safety_car_laps and sets each driver's earliest_dnf_lap.
+        À la fin de la course, les pilotes en DNF se voient attribuer les dernières places.
+        Ensuite, un dictionnaire (ou DataFrame) outcomes est créé pour enregistrer
+        pour chaque pilote le temps cumulé et le classement final.
+        """
+        # 1) Initialisation des DNFs et des laps safety car
         self._initialize_retirements_and_safety_car()
 
         for lap in range(1, self.number_of_laps + 1):
-            # 1) Update DNF status
+            # 1) Mise à jour du statut DNF et calcul du temps de tour
             for driver in self.drivers_list:
                 driver.update_status(lap)
-
-                # 2) If alive, compute lap time
                 if driver.alive:
                     driver.update_info(lap, self.number_of_laps)
                     lap_time = self._compute_lap_time(driver, lap)
                     pit_stop_time = self._pit_stop(driver, lap)
-
                     driver.current_lap_time = lap_time + pit_stop_time
                     driver.cumulative_lap_time += driver.current_lap_time
                 else:
                     driver.current_lap_time = 0
 
-            # 3) Update positions for all alive drivers
+            # 2) Mise à jour des positions pour les pilotes en course
             for driver in self.drivers_list:
                 if driver.alive:
                     self._get_driver_position(driver)
                 else:
-                    driver.position = np.nan
+                    driver.position = None
 
-            # 4) Fill laps_summary for each driver
+            # 3) Enregistrement du résumé du tour pour chaque pilote
             for driver in self.drivers_list:
                 if driver.alive or (driver.earliest_dnf_lap == lap):
                     status_str = "running" if driver.alive else "DNF"
@@ -101,23 +99,51 @@ class Run:
                         ignore_index=True,
                     )
 
+        # 4) Finalisation du classement
+        finishers = [driver for driver in self.drivers_list if driver.alive]
+        dnfs = [driver for driver in self.drivers_list if not driver.alive]
+
+        # Classement des finishers par temps cumulé croissant.
+        finishers_sorted = sorted(finishers, key=lambda d: d.cumulative_lap_time)
+        # Pour les DNFs, le pilote qui a quitté le plus tôt sera classé le plus bas.
+        dnfs_sorted = sorted(dnfs, key=lambda d: d.earliest_dnf_lap)
+
+        total_drivers = len(self.drivers_list)
+        # Attribution des positions aux finishers (1 = meilleur temps)
+        for idx, driver in enumerate(finishers_sorted, start=1):
+            driver.position = idx
+        # Attribution des positions aux DNFs : premier DNF prend la dernière place, etc.
+        for idx, driver in enumerate(dnfs_sorted, start=1):
+            driver.position = total_drivers - idx + 1
+
+        # 5) Création du dictionnaire outcomes pour chaque pilote
+        outcomes_list = []
+        for driver in self.drivers_list:
+            outcomes_list.append({
+                "driver_id": driver.driver_id,
+                "driver_name": driver.name,
+                "final_position": driver.position,
+                "cumulative_time": driver.cumulative_lap_time,
+            })
+        self.outcomes = pd.DataFrame(outcomes_list)
+        # On peut également garder outcomes sous forme de dict si besoin :
+        # self.outcomes = {driver.driver_id: {"driver_name": driver.name,
+        #                                      "final_position": driver.position,
+        #                                      "cumulative_time": driver.cumulative_lap_time}
+        #                  for driver in self.drivers_list}
 
     def _initialize_retirements_and_safety_car(self):
         """
-        1) Calls `simulate_dnf_lap(driver)` for each driver to assign earliest_dnf_lap.
-        2) If earliest_dnf_lap is set for a driver, we deploy the safety car
-           for 5 laps with probability p_safety_car (e.g., 0.2).
+        1) Appelle `simulate_dnf_lap(driver)` pour chaque pilote afin d'assigner earliest_dnf_lap.
+        2) Si earliest_dnf_lap est défini pour un pilote, déploie le safety car pendant 5 tours
+           avec une probabilité p_safety_car (par exemple 0.2).
         """
         p_safety_car = 0.2
         safety_car_duration = 5
 
         for driver in self.drivers_list:
-            # 1) Call the existing function that sets earliest_dnf_lap
             self.simulate_dnf_lap(driver)
-
-            # 2) If the driver does retire at some lap, we have earliest_dnf_lap
             if driver.earliest_dnf_lap is not None:
-                # Deploy safety car for the next 5 laps with probability 0.2
                 if np.random.rand() < p_safety_car:
                     sc_start = driver.earliest_dnf_lap
                     sc_end = min(sc_start + safety_car_duration - 1, self.number_of_laps)
@@ -127,15 +153,15 @@ class Run:
 
     def _compute_lap_time(self, driver: Driver, current_lap: int) -> float:
         """
-        Calculate the lap time for a driver using their regression model,
-        adding a random stochastic term, and adjusting for safety car.
+        Calcule le temps de tour pour un pilote en utilisant son modèle de régression,
+        en ajoutant un terme stochastique, et en ajustant en cas de safety car.
 
         Args:
-            driver (Driver): The driver object.
-            current_lap (int): The lap number.
+            driver (Driver): L'objet pilote.
+            current_lap (int): Numéro du tour.
 
         Returns:
-            float: Computed lap time for this lap.
+            float: Temps de tour calculé.
         """
         import pandas as pd
 
@@ -145,14 +171,10 @@ class Run:
             "tireage": [driver.tire_age],
         })
 
-        # Base time from the FuelAndTireModel
         base_time = driver.fuel_tire_model.predict(features).iloc[0]
-
-        # Random variation
         time_variability = np.random.normal(0, driver.variability)
         lap_time = driver.best_qualif_time + base_time + time_variability
 
-        # Safety car adjustment
         if current_lap in self.safety_car_laps:
             lap_time *= 1.2
 
@@ -160,8 +182,8 @@ class Run:
 
     def _pit_stop(self, driver: Driver, current_lap: int) -> float:
         """
-        Manage pit stop if the driver is scheduled on this lap or if
-        there's a beneficial time during safety car, etc.
+        Gère l'arrêt aux stands si le pilote est programmé à ce tour ou si un arrêt pendant
+        le safety car est avantageux.
         """
         try:
             if driver.next_pit_stop in driver.pit_stops_info:
@@ -184,7 +206,7 @@ class Run:
                     pit_stop_obj.calculate_best_pit_stop_duration()
                     calculated_duration = pit_stop_obj.calculate_pit_stop_duration()
 
-                    driver.tire_age =  pit_stop_data["tire_age"]
+                    driver.tire_age = pit_stop_data["tire_age"]
                     driver.compound = pit_stop_data["compound"]
                     driver.next_pit_stop += 1
 
@@ -196,7 +218,7 @@ class Run:
 
     def _get_driver_position(self, driver: Driver):
         """
-        Sort alive drivers by cumulative lap time and assign positions.
+        Trie les pilotes encore en course par temps cumulé et assigne une position.
         """
         sorted_drivers = sorted(
             [drv for drv in self.drivers_list if drv.alive],
@@ -210,14 +232,12 @@ class Run:
         """
         Initialise la course, détermine les pilotes participants et leur stratégie.
         """
-        # Pour éviter les erreurs si driver_strategies est None
         if driver_strategies is None:
             driver_strategies = {}
 
         races_df = self.dataframes["races"]
         qualifyings_df = self.dataframes["qualifyings"]
 
-        # Récupération de la course en fonction de la saison & location
         race_row = races_df[
             (races_df["season"] == self.season)
             & (races_df["location"] == self.gp_location)
@@ -230,7 +250,6 @@ class Run:
         self.race_id = race_row["id"].iloc[0]
         self.number_of_laps = race_row.iloc[0]["nolapsplanned"]
 
-        # Construction de la grille de départ depuis les qualifs
         merged_data = qualifyings_df.merge(
             races_df,
             left_on="race_id",
@@ -249,7 +268,6 @@ class Run:
         sorted_rows = qualifying_rows.sort_values(by="position")
         self.starting_grid = list(zip(sorted_rows["driver_id"], sorted_rows["position"]))
 
-        # On instancie les Driver
         drivers_df = self.dataframes["drivers"]
         driver_ids = sorted_rows["driver_id"].unique().tolist()
 
@@ -259,9 +277,6 @@ class Run:
                 continue
 
             driver_name = driver_row.iloc[0]["name"]
-
-            # On récupère la stratégie pour ce pilote depuis le dictionnaire
-            # Si le nom du pilote n'y est pas, on envoie un dict vide.
             strategy_for_this_driver = driver_strategies.get(driver_name, {})
 
             driver_obj = Driver(
@@ -269,15 +284,15 @@ class Run:
                 race_id=self.race_id,
                 dataframes=self.dataframes,
                 name=driver_name,
-                strategy=strategy_for_this_driver,  # On passe la stratégie ici
+                strategy=strategy_for_this_driver,
             )
             self.drivers_list.append(driver_obj)
 
     def simulate_dnf_lap(self, driver: Driver):
         """
-        Randomly select an accident lap and a failure lap for the driver
-        based on binomial draws for accidents/failures.
-        The earliest of these, if any, is the actual DNF lap.
+        Sélectionne aléatoirement un tour pour un accident et un tour pour une défaillance
+        en utilisant des tirages binomiaux. Le plus tôt de ces deux tours, s'il existe,
+        sera le tour effectif du DNF.
         """
         driver.accident_dnf_lap = (
             np.random.randint(1, self.number_of_laps + 1)
