@@ -3,6 +3,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from run import Run
 from data_loader import DataLoader
+from spearman_evaluation import SpearmanEvaluation
+from wilcoxon_evaluation import WilcoxonEvaluation
+
 
 class MonteCarloSimulator:
     """
@@ -27,17 +30,14 @@ class MonteCarloSimulator:
         self.num_simulations = num_simulations
         self.db_path = db_path
         self.data_loader = DataLoader(db_path=self.db_path)
-        # On suppose que le DataLoader charge les tables suivantes :
-        # - "races", "qualifyings", "drivers", et "results"
         self.dataframes = self.data_loader.load_data()
-        # Stocke les outcomes simulés de chaque simulation
         self.results = []
-        # DataFrame final regroupant tous les outcomes simulés
         self.final_outcomes = pd.DataFrame()
+        self.comparison_df=pd.DataFrame()
 
     def run_simulation(self):
         """
-        Exécute plusieurs simulations de course et stocke les outcomes finaux.
+        Runs multiple race simulations and stores the final outcomes.
         """
         for i in range(self.num_simulations):
             race_run = Run(
@@ -47,163 +47,100 @@ class MonteCarloSimulator:
                 driver_strategies=self.driver_strategies
             )
             race_run.run()
-            # On récupère directement le DataFrame outcomes généré dans la classe Run.
             self.results.append(race_run.outcomes.copy())
-            print(f"Simulation {i+1}/{self.num_simulations} terminée.")
+            print(f"Simulation {i+1}/{self.num_simulations} completed.")
         
-        # Concatène tous les outcomes simulés dans un DataFrame final
         self.final_outcomes = pd.concat(self.results, ignore_index=True)
 
-    def analyze_results(self):
+    def compare_outcomes(self):
         """
-        Calcule la moyenne des outcomes simulés par pilote.
+        Compare simulated race results with actual results.
 
         Returns:
-            DataFrame: Moyennes des positions finales et des temps cumulés simulés,
-                       triées par position finale moyenne.
+            DataFrame: Contains comparison of simulated and actual positions and times.
         """
         if self.final_outcomes.empty:
-            print("Aucun outcome simulé à analyser. Veuillez exécuter d'abord run_simulation().")
+            print("No simulated outcomes available.")
             return pd.DataFrame()
-        
-        mean_results = self.final_outcomes.groupby("driver_id").agg({
+
+        if "starterfields" not in self.dataframes or "laps" not in self.dataframes:
+            print("Missing required race data.")
+            return pd.DataFrame()
+
+        # Get the race_id of the current GP
+        races_df = self.dataframes["races"]
+        race_row = races_df[(races_df["season"] == self.season) & (races_df["location"] == self.gp_location)]
+        if race_row.empty:
+            print("No race found for the specified season and location.")
+            return pd.DataFrame()
+        race_id = race_row["id"].iloc[0]
+
+        # Simulated results
+        sim_outcomes = self.final_outcomes.groupby("driver_id").agg({
             "final_position": "mean",
             "cumulative_time": "mean"
-        }).reset_index()
-        mean_results = mean_results.sort_values(by="final_position")
-        return mean_results
-    
+        }).reset_index().rename(columns={
+            "final_position": "final_position_sim",
+            "cumulative_time": "cumulative_time_sim"
+        })
 
-    def compare_outcomes(self):
-      """
-      Compare les outcomes simulés moyens avec les résultats réels de la course
-      issus de la table 'starterfields'. On filtre pour ne sélectionner que la course
-      correspondant au season et gp_location de la simulation.
-      
-      On utilise 'resultposition' comme la position finale réelle.
+        # Actual results
+        actual_outcomes = self.dataframes["starterfields"]
+        actual_outcomes = actual_outcomes[actual_outcomes["race_id"] == race_id]
+        actual_outcomes = actual_outcomes.rename(columns={"resultposition": "final_position_actual"})
+        actual_outcomes = actual_outcomes[["driver_id", "final_position_actual"]]
 
-      Returns:
-          DataFrame: Tableau de comparaison contenant :
-              - driver_id
-              - final_position_sim (moyenne simulée)
-              - final_position_actual (résultat réel)
-              - position_diff (écart)
-      """
-      if self.final_outcomes.empty:
-          print("Aucun outcome simulé à comparer. Veuillez exécuter d'abord run_simulation().")
-          return pd.DataFrame()
+        # Actual lap times from `laps` table
+        laps_df = self.dataframes["laps"]
+        last_laps = laps_df[laps_df["race_id"] == race_id].groupby("driver_id")["lapno"].max().reset_index()
+        final_times = pd.merge(laps_df[laps_df["race_id"] == race_id], last_laps, on=["driver_id", "lapno"], how="inner")[["driver_id", "racetime"]]
+        final_times = final_times.rename(columns={"racetime": "cumulative_time_actual"})
 
-      # Vérifier que la table starterfields existe
-      if "starterfields" not in self.dataframes:
-          print("Les résultats réels ne sont pas disponibles dans les données (table 'starterfields' non trouvée).")
-          return pd.DataFrame()
+        # Merge all data
+        self.comparison_df = pd.merge(sim_outcomes, actual_outcomes, on="driver_id", how="inner")
+        self.comparison_df = pd.merge(self.comparison_df, final_times, on="driver_id", how="inner")
 
-      # Détermination du race_id correspondant à la simulation
-      races_df = self.dataframes["races"]
-      race_row = races_df[(races_df["season"] == self.season) & (races_df["location"] == self.gp_location)]
-      if race_row.empty:
-          print("Aucune course trouvée pour la saison et le gp_location spécifiés.")
-          return pd.DataFrame()
-      race_id = race_row["id"].iloc[0]
-
-      # Calcul des outcomes simulés moyens par pilote
-      sim_outcomes = self.final_outcomes.groupby("driver_id").agg({
-          "final_position": "mean"
-      }).reset_index().rename(columns={
-          "final_position": "final_position_sim"
-      })
-
-      # Récupération et filtrage des résultats réels depuis la table 'starterfields'
-      actual_outcomes = self.dataframes["starterfields"].copy()
-      # Filtrer pour la bonne course
-      actual_outcomes = actual_outcomes[actual_outcomes["race_id"] == race_id]
-      # Renommer 'resultposition' pour la comparaison
-      actual_outcomes = actual_outcomes.rename(columns={
-          "resultposition": "final_position_actual"
-      })
-      # On ne conserve que les colonnes nécessaires
-      actual_outcomes = actual_outcomes[["driver_id", "final_position_actual"]]
-
-      # Fusion sur driver_id
-      comparison_df = pd.merge(sim_outcomes, actual_outcomes, on="driver_id", how="inner")
-      # Calcul de l'écart
-      comparison_df["position_diff"] = comparison_df["final_position_sim"] - comparison_df["final_position_actual"]
-
-      return comparison_df
-
-
-    def plot_driver_outcomes(self, driver_id_input):
-        """
-        Affiche la distribution des outcomes simulés pour un pilote donné.
-
-        Args:
-            driver_id_input: Le driver_id (sera converti en int).
-        """
-        try:
-            driver_id = int(driver_id_input)
-        except ValueError:
-            print("Driver_id invalide, il doit être un entier.")
-            return
-
-        if self.final_outcomes.empty:
-            print("Aucun outcome simulé disponible. Exécutez run_simulation() d'abord.")
-            return
-
-        driver_data = self.final_outcomes[self.final_outcomes["driver_id"] == driver_id]
-        if driver_data.empty:
-            print(f"Aucun résultat trouvé pour le pilote {driver_id}.")
-            return
-
-        positions = driver_data["final_position"].values
-        times = driver_data["cumulative_time"].values
-
-        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-        axs[0].hist(positions, bins=range(int(positions.min()), int(positions.max())+2),
-                    color='blue', alpha=0.7, edgecolor='black')
-        axs[0].set_xlabel("Position finale")
-        axs[0].set_ylabel("Fréquence")
-        axs[0].set_title(f"Distribution des positions finales pour le pilote {driver_id}")
-
-        axs[1].hist(times, bins=20, color='red', alpha=0.7, edgecolor='black')
-        axs[1].set_xlabel("Temps cumulé")
-        axs[1].set_ylabel("Fréquence")
-        axs[1].set_title(f"Distribution du temps cumulé pour le pilote {driver_id}")
-
-        plt.tight_layout()
-        plt.show()
+        return self.comparison_df
 
     def summarize(self):
         """
-        Affiche le résumé des simulations (moyennes simulées) et la comparaison
-        avec les résultats réels, puis propose d'afficher le plot pour un pilote choisi.
+        Summarizes simulation results, compares outcomes, and performs statistical tests.
         """
-        mean_results = self.analyze_results()
-        if mean_results.empty:
+        self.compare_outcomes()  
+
+        if self.comparison_df.empty:
+            print("\nNo actual race results available for comparison.")
             return
 
-        print("Résultats moyens simulés (triés par position finale) issus des simulations Monte Carlo:")
-        print(mean_results)
+        # Ensure required columns exist
+        required_columns = {"final_position_actual", "final_position_sim", "cumulative_time_actual", "cumulative_time_sim"}
+        if not required_columns.issubset(self.comparison_df.columns):
+            print("\nMissing required columns for evaluation. Check `compare_outcomes()`.")
+            return
 
-        comparison_df = self.compare_outcomes()
-        if not comparison_df.empty:
-            print("\nComparaison entre outcomes simulés et réels:")
-            print(comparison_df)
-        else:
-            print("\nImpossible de comparer avec les résultats réels (vérifiez la présence de la table 'results').")
+        # Run Wilcoxon test on race times
+        print("\n=== Wilcoxon Test for Lap Times ===")
+        wilcoxon_eval = WilcoxonEvaluation(
+            actual_data=self.comparison_df["cumulative_time_actual"],
+            simulated_data=self.comparison_df["cumulative_time_sim"]
+        )
+        wilcoxon_eval.evaluate()
 
-        driver_choice = input(
-            "Entrez le driver_id du pilote pour lequel vous souhaitez afficher le graphique "
-            "(ou appuyez sur Entrée pour quitter) : "
-        ).strip()
-        if driver_choice:
-            self.plot_driver_outcomes(driver_choice)
-        else:
-            print("Aucun pilote sélectionné pour le plot.")
+        # Run Spearman Rank test for positions
+        print("\n=== Spearman Rank Correlation for Positions ===")
+        spearman_eval = SpearmanEvaluation(
+            actual_data=self.comparison_df["final_position_actual"],
+            simulated_data=self.comparison_df["final_position_sim"]
+        )
+        spearman_eval.evaluate()
 
 
 if __name__ == "__main__":
     db_path = "F1_timingdata_2014_2019.sqlite"
     season = 2016
+    gp_location = "Austin"
+    num_simulations = 2
+
     driver_strategies = {
         'Lewis Hamilton': {'starting_compound': 'A3',
                            'starting_tire_age': 2,
@@ -422,12 +359,7 @@ if __name__ == "__main__":
                              'tire_age': 18}}
         }
     
-    gp_location = "Austin"
-    num_simulations = 20  # Pour tester
-
+    
     simulator = MonteCarloSimulator(season, gp_location, db_path, driver_strategies, num_simulations)
     simulator.run_simulation()
     simulator.summarize()
-
-
-  
