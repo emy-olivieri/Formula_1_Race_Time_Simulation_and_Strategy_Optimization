@@ -2,9 +2,16 @@
 
 ## Introduction
 
-This repository hosts a comprehensive race simulation framework tailored for circuit motorsport events, with a particular focus on Formula 1. The model is designed to simulate and analyze race strategies, including pit stop planning (number of stops, inlaps, and tire compound selection), and long-term race effects.
+This repository hosts a race simulation framework for circuit motorsport events, with a particular focus on Formula 1. The model is designed to simulate and analyze race strategies, including pit stop planning (number of stops, inlaps, and tire compound selection), and long-term race effects (tire & fuel performance, etc).
 
 Utilizing a lap-wise discretization approach, the simulation balances computational efficiency with high accuracy. To account for uncertainties and stochastic race events, probabilistic influences are integrated through Monte Carlo simulations, enabling an extensive evaluation of various race scenarios and optimizing strategy selection.
+
+## Utilisation
+
+The model can be used for multiple applications, including:
+- Race Outcome Prediction: Simulating race predicstions based on qualifying outcomes and strategic decisions.
+- Strategy Optimisation: Comparing different pit stop strategies, tyre choices, and fuel management approaches to identify the most effective race strategy.
+- What-If Scenarios: Testing various conditions, including safety car deployments, accidents, and different driver strategies to evaluate their impact on race results.
 
 ## Keywords
 
@@ -12,7 +19,7 @@ Formula 1, Race Simulation, Monte Carlo Methods, Discrete Event Simulation, Baye
 
 ## General Presentation
 
-- **Lap Time Simulation**: Implements discrete-event simulation (DES) for lap time modeling.
+- **Lap Time Simulation**: Implements discrete-event simulation for lap time modeling.
 - **On-Track Event Modeling**: Simulates race elements including fuel & tire performance, race incidents (failures and accidents), pit stops, and safety car deployments to create a more realistic race environment.
 - **Fuel & Tire Performance**: Implements a model that dynamically adjusts lap times based on fuel consumption and tire degradation through OLS estimation, leveraging historical race data.
 - **Race Incidents**: Separates failures and accidents using real data: mechanical breakdowns are modeled based on team-specific failure rates, while accidents are simulated using driver-specific historical incident data, including safety car deployments. Bayesian statistics are used to model the probability of failure and accident.
