@@ -16,14 +16,14 @@ class WilcoxonEvaluation(Evaluation):
             return None, 1.0
         
         test_statistic, p_value = wilcoxon(differences)
-        print("\n📊 Résultats du test de Wilcoxon:")
+        print("\n Résultats du test de Wilcoxon:")
         print(f"Statistique de test : {test_statistic}")
         print(f"P-value : {p_value:.5f}")
         
         alpha = 0.05
         if p_value < alpha:
-            print("❌ Rejet de H0 : Les temps simulés et réels diffèrent significativement.")
+            print(" Rejet de H0 : Les temps simulés et réels diffèrent significativement.")
         else:
-            print("✅ Non-rejet de H0 : Aucune différence significative entre les temps simulés et réels.")
+            print("Non-rejet de H0 : Aucune différence significative entre les temps simulés et réels.")
             
         return test_statistic, p_value

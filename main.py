@@ -1,7 +1,7 @@
 from monte_carlo_simulator import MonteCarloSimulator
 
 if __name__ == "__main__":
-    db_path = "F1_timingdata_2014_2019.sqlite"
+    db_path = "data/F1_timingdata_2014_2019.sqlite"
     season = 2016
     driver_strategies = {
             'Lewis Hamilton': {'starting_compound': 'A3',

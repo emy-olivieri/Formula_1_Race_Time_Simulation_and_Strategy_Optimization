@@ -33,7 +33,7 @@ class MonteCarloSimulator:
         self.dataframes = self.data_loader.load_data()
         self.results = []
         self.final_outcomes = pd.DataFrame()
-        self.comparison_df=pd.DataFrame()
+        self.comparison_df = pd.DataFrame()
 
     def run_simulation(self):
         """
@@ -75,7 +75,7 @@ class MonteCarloSimulator:
             return pd.DataFrame()
         race_id = race_row["id"].iloc[0]
 
-        # Simulated results
+        # Simulated results: calculate the average outcomes over the simulations.
         sim_outcomes = self.final_outcomes.groupby("driver_id").agg({
             "final_position": "mean",
             "cumulative_time": "mean"
@@ -93,7 +93,12 @@ class MonteCarloSimulator:
         # Actual lap times from `laps` table
         laps_df = self.dataframes["laps"]
         last_laps = laps_df[laps_df["race_id"] == race_id].groupby("driver_id")["lapno"].max().reset_index()
-        final_times = pd.merge(laps_df[laps_df["race_id"] == race_id], last_laps, on=["driver_id", "lapno"], how="inner")[["driver_id", "racetime"]]
+        final_times = pd.merge(
+            laps_df[laps_df["race_id"] == race_id],
+            last_laps,
+            on=["driver_id", "lapno"],
+            how="inner"
+        )[["driver_id", "racetime"]]
         final_times = final_times.rename(columns={"racetime": "cumulative_time_actual"})
 
         # Merge all data
@@ -102,9 +107,41 @@ class MonteCarloSimulator:
 
         return self.comparison_df
 
+    def plot_results(self):
+        """
+        Plots the mean final positions and cumulative times.
+        
+        Args:
+            mean_results (DataFrame): DataFrame containing driver_id, mean final position, and mean cumulative time.
+        """
+        print("Comparaison des résultats moyens issus des simulations Monte Carlo et des réels:")
+        
+        print(self.comparison_df.columns)
+        
+        # Create a plot with two y-axes
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+        
+        # Bar plot for the average final positions
+        ax1.bar(self.comparison_df['driver_id'], self.comparison_df['final_position_sim'], color='blue', alpha=0.7)
+        ax1.set_xlabel("Driver ID")
+        ax1.set_ylabel("Position finale moyenne", color='blue')
+        ax1.tick_params(axis='y', labelcolor='blue')
+        ax1.set_title("Simulations Monte Carlo: Positions finales et temps cumulé moyens")
+        plt.xticks(rotation=90)
+        
+        # Second y-axis for the average cumulative times
+        ax2 = ax1.twinx()
+        ax2.plot(self.comparison_df['driver_id'], self.comparison_df['cumulative_time_sim'], color='red', marker='o', linestyle='--')
+        ax2.set_ylabel("Temps cumulé moyen", color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
+        
+        plt.tight_layout()
+        plt.show()
+
     def summarize(self):
         """
         Summarizes simulation results, compares outcomes, and performs statistical tests.
+        Also plots the simulation outcomes.
         """
         self.compare_outcomes()  
 
@@ -133,7 +170,18 @@ class MonteCarloSimulator:
             simulated_data=self.comparison_df["final_position_sim"]
         )
         spearman_eval.evaluate()
-
+        
+        # Compute mean simulation results for plotting
+        # Here we use the aggregated simulated outcomes already computed in compare_outcomes
+        mean_results = self.comparison_df[['driver_id', 'final_position_sim', 'cumulative_time_sim']].rename(
+            columns={'final_position_sim': 'final_position', 'cumulative_time_sim': 'cumulative_time'}
+        )
+        
+        # Call the new function to plot the results
+        self.plot_results()
+        
+        return 
+    
 
 if __name__ == "__main__":
     db_path = "F1_timingdata_2014_2019.sqlite"

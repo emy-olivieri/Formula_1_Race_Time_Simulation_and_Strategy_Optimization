@@ -50,7 +50,9 @@ class Run:
                         "cumulative_lap_time": driver.cumulative_lap_time,
                         "status": status_str,
                     }
-                    self.laps_summary = pd.concat([self.laps_summary, pd.DataFrame([new_row])], ignore_index=True)
+                    new_row_df = pd.DataFrame([new_row]).dropna(axis=1, how='all')
+                    self.laps_summary = pd.concat([self.laps_summary, new_row_df], ignore_index=True)
+
         finishers = [driver for driver in self.drivers_list if driver.alive]
         dnfs = [driver for driver in self.drivers_list if not driver.alive]
         finishers_sorted = sorted(finishers, key=lambda d: d.cumulative_lap_time)
@@ -84,7 +86,6 @@ class Run:
                             self.safety_car_laps.append(lap_sc)
 
     def _compute_lap_time(self, driver: Driver, current_lap: int) -> float:
-        import pandas as pd
         features = pd.DataFrame({
             "fuelc": [driver.fuelc],
             "compound": [driver.compound],
