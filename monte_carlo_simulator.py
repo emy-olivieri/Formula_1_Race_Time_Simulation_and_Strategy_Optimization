@@ -116,7 +116,7 @@ class MonteCarloSimulator:
         """
         print("Comparaison des résultats moyens issus des simulations Monte Carlo et des réels:")
         
-        print(self.comparison_df.columns)
+        print(self.comparison_df)
         
         # Create a plot with two y-axes
         fig, ax1 = plt.subplots(figsize=(10, 6))
