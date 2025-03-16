@@ -105,7 +105,7 @@ class MonteCarloSimulator:
         self.comparison_df = pd.merge(sim_outcomes, actual_outcomes, on="driver_id", how="inner")
         self.comparison_df = pd.merge(self.comparison_df, final_times, on="driver_id", how="inner")
 
-        return self.comparison_df
+        return self.comparison_df.sort_values(by=["final_position_actual"])
 
     def plot_results(self):
         """
