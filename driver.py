@@ -94,10 +94,12 @@ class Driver:
         self.fuel_tire_model = fuel_tire_model_obj
         self.variability = fuel_tire_model_obj.variability
 
-    def update_status(self, current_lap: int):
-        if self.alive and self.earliest_dnf_lap == current_lap:
-            self.alive = False
-
+    def update_status(self, current_lap):
+        """Ensure that drivers retire at the correct lap."""
+        if self.earliest_dnf_lap is not None:
+            if current_lap >= self.earliest_dnf_lap:  # DNF at this lap
+                self.alive = False  # Stop the driver
+                
     def update_info(self, current_lap: int, total_laps: int):
         self.tire_age += 1
         self.fuelc = max(self.fuelc - (100/total_laps), 0)

@@ -1,4 +1,5 @@
 import numpy as np
+from rich.progress import Progress
 import pandas as pd
 import matplotlib.pyplot as plt
 from run import Run
@@ -13,7 +14,7 @@ class MonteCarloSimulator:
     Runs multiple simulations to assess variability in race outcomes
     and compare simulated outcomes with actual race results.
     """
-    def __init__(self, season, gp_location, db_path, driver_strategies, num_simulations=1000):
+    def __init__(self, season, gp_location, db_path, driver_strategies, num_simulations=1000,test=False):
         """
         Initialize the Monte Carlo simulator.
 
@@ -25,6 +26,7 @@ class MonteCarloSimulator:
             num_simulations (int): Number of Monte Carlo iterations.
         """
         self.season = season
+        self.test=test
         self.driver_strategies = driver_strategies
         self.gp_location = gp_location
         self.num_simulations = num_simulations
@@ -39,19 +41,22 @@ class MonteCarloSimulator:
         """
         Runs multiple race simulations and stores the final outcomes.
         """
-        for i in range(self.num_simulations):
-            race_run = Run(
-                season=self.season,
-                gp_location=self.gp_location,
-                dataframes=self.dataframes,
-                driver_strategies=self.driver_strategies
-            )
-            race_run.run()
-            self.results.append(race_run.outcomes.copy())
-            print(f"Simulation {i+1}/{self.num_simulations} completed.")
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Running simulations...", total=self.num_simulations)
+        
+            for _ in range(self.num_simulations):
+                race_run = Run(
+                    season=self.season,
+                    gp_location=self.gp_location,
+                    dataframes=self.dataframes,
+                    driver_strategies=self.driver_strategies,
+                    test=self.test
+                )
+                race_run.run()
+                self.results.append(race_run.outcomes.copy())
+                progress.update(task, advance=1)  # Increment progress bar
         
         self.final_outcomes = pd.concat(self.results, ignore_index=True)
-
     def compare_outcomes(self):
         """
         Compare simulated race results with actual results.
@@ -104,8 +109,8 @@ class MonteCarloSimulator:
         # Merge all data
         self.comparison_df = pd.merge(sim_outcomes, actual_outcomes, on="driver_id", how="inner")
         self.comparison_df = pd.merge(self.comparison_df, final_times, on="driver_id", how="inner")
-
-        return self.comparison_df.sort_values(by=["final_position_actual"])
+        self.comparison_df = self.comparison_df.sort_values(by=["final_position_sim"])
+        return self.comparison_df
 
     def plot_results(self):
         """
@@ -131,7 +136,7 @@ class MonteCarloSimulator:
         
         # Second y-axis for the average cumulative times
         ax2 = ax1.twinx()
-        ax2.plot(self.comparison_df['driver_id'], self.comparison_df['cumulative_time_sim'], color='red', marker='o', linestyle='--')
+        ax2.scatter(self.comparison_df['driver_id'], self.comparison_df['cumulative_time_sim'], color='red', marker='o', linestyle='--')
         ax2.set_ylabel("Temps cumulé moyen", color='red')
         ax2.tick_params(axis='y', labelcolor='red')
         

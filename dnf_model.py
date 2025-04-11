@@ -23,9 +23,8 @@ class DNFModel(Model):
         self.season = None
         self.dfs_local = {n: df.copy() for n, df in dataframes.items()}
 
-        # We might store probabilities after fit
-        self.accident_probability = 0.2
-        self.failure_probability = 0.2
+        self.accident_probability = None
+        self.failure_probability = None
         self.is_fitted = False
 
     def fit(self, driver, season):

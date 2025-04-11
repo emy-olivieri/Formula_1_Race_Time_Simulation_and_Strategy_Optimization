@@ -8,37 +8,53 @@ class Run:
     """
     Orchestre la simulation d'une course pour une saison, un circuit et un jeu de données donnés.
     """
-    def __init__(self, season: int, gp_location: str, dataframes: dict, driver_strategies=None):
+    def __init__(self, season: int, gp_location: str, dataframes: dict, driver_strategies=None,test=False):
+        safety_car_dict_for_testing= {
+            "Suzuka": [],
+            "Austin": [31, 32],
+            "Mexico City": [1,2],
+            "Yas Marina": []
+        }
+        self.test=test
         self.season = season
         self.gp_location = gp_location
         self.race_id = None
         self.dataframes = dataframes
-        self.safety_car_laps = []
+        self.safety_car_laps = safety_car_dict_for_testing.get(gp_location, []) if test else []
         self.number_of_laps = None
         self.drivers_list = []
         self.starting_grid = None
-        self.laps_summary = pd.DataFrame(columns=["lap", "driver_id", "position", "lap_time", "cumulative_lap_time", "status"])
+        self.laps_summary = pd.DataFrame(
+    columns=["lap", "driver_id", "position", "lap_time", "cumulative_lap_time", "status"],
+    dtype=object 
+)
         self.outcomes = {}
         self._initialize_parameters(driver_strategies)
 
     def run(self):
         self._initialize_retirements_and_safety_car()
+        
         for lap in range(1, self.number_of_laps + 1):
             for driver in self.drivers_list:
-                driver.update_status(lap)
-                if driver.alive:
+                driver.update_status(lap)  # Ensure DNF status is updated
+
+                if driver.alive:  
                     driver.update_info(lap, self.number_of_laps)
                     lap_time = self._compute_lap_time(driver, lap)
                     pit_stop_time = self._pit_stop(driver, lap)
                     driver.current_lap_time = lap_time + pit_stop_time
                     driver.cumulative_lap_time += driver.current_lap_time
                 else:
-                    driver.current_lap_time = 0
+                    driver.current_lap_time = 0 
+                    
+            # Update driver positions
             for driver in self.drivers_list:
                 if driver.alive:
                     self._get_driver_position(driver)
                 else:
                     driver.position = None
+
+            # Save lap data
             for driver in self.drivers_list:
                 if driver.alive or (driver.earliest_dnf_lap == lap):
                     status_str = "running" if driver.alive else "DNF"
@@ -51,17 +67,24 @@ class Run:
                         "status": status_str,
                     }
                     new_row_df = pd.DataFrame([new_row]).dropna(axis=1, how='all')
-                    self.laps_summary = pd.concat([self.laps_summary, new_row_df], ignore_index=True)
+                    if not new_row_df.empty:  # Avoid concatenating an empty DataFrame
+                        self.laps_summary = pd.concat([self.laps_summary, new_row_df.dropna(axis=1, how='all')], ignore_index=True)
 
+
+        # Sorting finishers and DNF drivers
         finishers = [driver for driver in self.drivers_list if driver.alive]
         dnfs = [driver for driver in self.drivers_list if not driver.alive]
         finishers_sorted = sorted(finishers, key=lambda d: d.cumulative_lap_time)
         dnfs_sorted = sorted(dnfs, key=lambda d: d.earliest_dnf_lap if d.earliest_dnf_lap is not None else np.inf)
+
         total_drivers = len(self.drivers_list)
+
         for idx, driver in enumerate(finishers_sorted, start=1):
             driver.position = idx
+
         for idx, driver in enumerate(dnfs_sorted, start=1):
-            driver.position = total_drivers - idx + 1
+            driver.position = total_drivers - idx + 1  # Rank DNF drivers at the bottom
+
         outcomes_list = []
         for driver in self.drivers_list:
             outcomes_list.append({
@@ -73,17 +96,25 @@ class Run:
         self.outcomes = pd.DataFrame(outcomes_list)
 
     def _initialize_retirements_and_safety_car(self):
-        p_safety_car = 0.2
-        safety_car_duration = 5
-        for driver in self.drivers_list:
-            self.simulate_dnf_lap(driver)
-            if driver.earliest_dnf_lap is not None:
-                if np.random.rand() < p_safety_car:
-                    sc_start = driver.earliest_dnf_lap
-                    sc_end = min(sc_start + safety_car_duration - 1, self.number_of_laps)
-                    for lap_sc in range(sc_start, sc_end + 1):
-                        if lap_sc not in self.safety_car_laps:
-                            self.safety_car_laps.append(lap_sc)
+        # Deterministic test mode : 
+        if self.test:  
+            for driver in self.drivers_list:
+                self.simulate_dnf_lap(driver)
+            return  # For TESTS
+        # Probabilistic mode : 
+        else:
+            p_safety_car = 0.2
+            safety_car_duration = 5
+
+            for driver in self.drivers_list:
+                self.simulate_dnf_lap(driver)
+                if driver.earliest_dnf_lap is not None:
+                    if np.random.rand() < p_safety_car:
+                        sc_start = driver.earliest_dnf_lap
+                        sc_end = min(sc_start + safety_car_duration - 1, self.number_of_laps)
+                        for lap_sc in range(sc_start, sc_end + 1):
+                            if lap_sc not in self.safety_car_laps:
+                                self.safety_car_laps.append(lap_sc)
 
     def _compute_lap_time(self, driver: Driver, current_lap: int) -> float:
         features = pd.DataFrame({
@@ -162,15 +193,29 @@ class Run:
             self.drivers_list.append(driver_obj)
 
     def simulate_dnf_lap(self, driver: Driver):
-        driver.accident_dnf_lap = (
-            np.random.randint(1, self.number_of_laps + 1)
-            if np.random.binomial(1, driver.accident_dnf_probability)
-            else None
-        )
-        driver.failure_dnf_lap = (
-            np.random.randint(1, self.number_of_laps + 1)
-            if np.random.binomial(1, driver.failure_dnf_probability)
-            else None
-        )
-        potential = [t for t in [driver.accident_dnf_lap, driver.failure_dnf_lap] if t is not None]
-        driver.earliest_dnf_lap = min(potential) if potential else None
+        # Deterministic test mode : 
+        if self.test: 
+            dnf_dict_for_testing = {  # TESTS
+                "Austin": {"Kimi Raikkonen": 38, "Max Verstappen": 28, "Esteban Gutierrez": 16, "Nico Hulkenberg": 1},
+                "MexicoCity": {"Pascal Wehrlein": 0, "Esteban Ocon": 69},
+                "YasMarina": {"Valtteri Bottas": 6, "Kevin Magnussen": 5, "Jenson Button" : 12, "Daniil Kvyat": 14, " Carlos Sainz Jr.": 41}
+            }
+            
+            predefined_dnf_laps = dnf_dict_for_testing.get(self.gp_location, {})
+            
+            if driver.name in predefined_dnf_laps:
+                    driver.earliest_dnf_lap = predefined_dnf_laps[driver.name]
+            
+        else:
+            driver.accident_dnf_lap = (
+                np.random.randint(1, self.number_of_laps + 1)
+                if np.random.binomial(1, driver.accident_dnf_probability)
+                else None
+            )
+            driver.failure_dnf_lap = (
+                np.random.randint(1, self.number_of_laps + 1)
+                if np.random.binomial(1, driver.failure_dnf_probability)
+                else None
+            )
+            potential = [t for t in [driver.accident_dnf_lap, driver.failure_dnf_lap] if t is not None]
+            driver.earliest_dnf_lap = min(potential) if potential else None
