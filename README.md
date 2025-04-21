@@ -1,10 +1,10 @@
-# F1 Race Simulation: A Data-Driven Approach to Predicting Race Strategies and Lap Times
+# F1 Race Simulation: A Data-Driven Approach to Predicting Race Strategies and Lap Times -- In Progress
 
 ## Introduction
 
 This repository hosts a race simulation framework for circuit motorsport events, with a particular focus on Formula 1. The model is designed to simulate and analyze race strategies, including pit stop planning (number of stops, inlaps, and tire compound selection), and long-term race effects (tire & fuel performance, etc).
 
-Utilizing a lap-wise discretization approach, the simulation balances computational efficiency with high accuracy. To account for uncertainties and stochastic race events, probabilistic influences are integrated through Monte Carlo simulations, enabling an extensive evaluation of various race scenarios and optimizing strategy selection.
+Utilising a lap-wise discretisation approach, the simulation balances computational efficiency with high accuracy. To account for uncertainties and stochastic race events, probabilistic influences are integrated through Monte Carlo simulations, enabling an extensive evaluation of various race scenarios and optimising strategy selection.
 
 ## Utilisation
 
@@ -103,10 +103,14 @@ The results of these tests will help refine the model and improve its predictive
 
 ## Improvements
 
-Future enhancements will include:
+Future enhancements are outlined in the [TODO List](./TODO.md), which includes : 
 
-- **Development of Sub-Models:** Implementation of an overtaking model to simulate realistic position changes based on driver behavior, track conditions, and race scenarios.
-- **AI-Driven Strategy Optimization:** Incorporating machine learning techniques to refine pit stop timing, fuel management, and tire choices dynamically.
+- [ ] Clean and thoroughly comment the code to improve readability and maintainability.
+- [ ] Implement time loss adjustments based on grid positions at the start of the race.
+- [ ] Redesign the architecture to store model outputs for each driver in a specific race and save them in a CSV/Excel file to avoid re-running the model for every simulation.
+- [ ] Optimize the running time by parallelizing simulations and improving dataset handling.
+- [ ] Improve the existing models for better accuracy and performance.
+- [ ] Develop and integrate a first-lap and overtaking model.
 
 ## References
 

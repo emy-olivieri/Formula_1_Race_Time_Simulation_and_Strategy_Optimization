@@ -9,7 +9,7 @@ class FuelAndTireModel(Model):
     Modèle pour estimer les temps au tour en fonction du carburant, du composé de pneus, etc.
     Utilise une régression OLS avec vectorisation et met en cache le modèle ajusté.
     """
-    ALL_COMPOUNDS = ["A1", "A2", "A3", "A4", "A5","A6" "A7", "I", "W"]
+    ALL_COMPOUNDS = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "I", "W"]
 
     # Cache pour stocker le modèle ajusté (clé = (driver_id, race_id, season))
     cache = {}
@@ -117,5 +117,5 @@ class FuelAndTireModel(Model):
         self.test_data = self.laps_df[self.laps_df["race_id"] == self.race_id]
 
     def _regression(self):
-        formula = "corrected_lap_time ~ fuelc + C(compound) + tireage"
+        formula = "corrected_lap_time ~ fuelc + C(compound) + tireage + C(compound):tireage"
         self.model = smf.ols(formula=formula, data=self.train_data).fit()

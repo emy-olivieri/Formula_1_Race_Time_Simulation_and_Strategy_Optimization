@@ -1,4 +1,3 @@
-# run.py
 import numpy as np
 import pandas as pd
 from pit_stop import PitStop
@@ -66,10 +65,15 @@ class Run:
                         "cumulative_lap_time": driver.cumulative_lap_time,
                         "status": status_str,
                     }
-                    new_row_df = pd.DataFrame([new_row]).dropna(axis=1, how='all')
-                    if not new_row_df.empty:  # Avoid concatenating an empty DataFrame
-                        self.laps_summary = pd.concat([self.laps_summary, new_row_df.dropna(axis=1, how='all')], ignore_index=True)
+                    # new_row_df = pd.DataFrame([new_row]).dropna(axis=1, how='all')
+                    # if not new_row_df.empty:  # Avoid concatenating an empty DataFrame
+                    #     self.laps_summary = pd.concat([self.laps_summary, new_row_df.dropna(axis=1, how='all')], ignore_index=True)
 
+                    if any(v is not None and not pd.isna(v) for v in new_row.values()):
+                        # Construire la liste des valeurs dans l’ordre des colonnes existantes
+                        row_values = [new_row.get(col, pd.NA) for col in self.laps_summary.columns]
+                        # Ajouter la ligne en place
+                        self.laps_summary.loc[len(self.laps_summary)] = row_values
 
         # Sorting finishers and DNF drivers
         finishers = [driver for driver in self.drivers_list if driver.alive]
