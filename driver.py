@@ -45,28 +45,33 @@ class Driver:
         starterfields_df = self.dataframes["starterfields"].copy()
         races_df = self.dataframes["races"].copy()
 
+        # Filter the drivers_df to get the driver_id and initials
         driver_row = drivers_df[drivers_df["name"] == self.name]
         if driver_row.empty:
             raise ValueError(f"Driver '{self.name}' non trouvé dans la table 'drivers'.")
         self.driver_id = driver_row.iloc[0]["id"]
         self.initials = driver_row.iloc[0]["initials"]
 
+        # Extract the best qualifying time for the driver 
         qualif_laps_df = self.dataframes["qualifyings"]
-        qualif_laps_df_for_driver = qualif_laps_df[
-            (qualif_laps_df["driver_id"] == self.driver_id) & (qualif_laps_df["race_id"] == race_id)
-        ].copy()
-        self.best_qualif_time = (
-            qualif_laps_df_for_driver[["race_id", "q1laptime", "q2laptime", "q3laptime"]]
-            .groupby("race_id").min().min(axis=1)
-            .reset_index(drop=True).iloc[0]
-        )
-        if np.isnan(self.best_qualif_time):
-            qualif_laps_df = qualif_laps_df[qualif_laps_df["race_id"] == race_id]
+        df_drv = qualif_laps_df[
+            (qualif_laps_df["driver_id"] == self.driver_id)
+            & (qualif_laps_df["race_id"] == race_id)
+        ][["q1laptime", "q2laptime", "q3laptime"]].copy()
+
+        if df_drv.empty or df_drv.dropna(how="all").empty:
+            # fallback sur moyenne des meilleurs temps de tous les pilotes pour la course
+            race_quals = qualif_laps_df[qualif_laps_df["race_id"] == race_id]
             self.best_qualif_time = (
-                qualif_laps_df[["race_id", "q1laptime", "q2laptime", "q3laptime"]]
-                .groupby("race_id").min().mean(axis=1)
-                .reset_index(drop=True).iloc[0]
+                race_quals[["race_id", "q1laptime", "q2laptime", "q3laptime"]]
+                .groupby("race_id")
+                .min()
+                .mean(axis=1)
+                .iloc[0]
             )
+        else:
+            # meilleur tour individuel
+            self.best_qualif_time = df_drv.min(axis=1).iloc[0]
 
         merged_data = starterfields_df.merge(
             races_df, left_on="race_id", right_on="id", suffixes=("_sf", "_races")

@@ -6,5 +6,5 @@
 - [ ] Redesign the architecture to store model outputs for each driver in a specific race and save them in a CSV/Excel file to avoid re-running the model for every simulation.
 - [ ] Optimize the running time by parallelizing simulations and improving dataset handling.
 - [ ] Improve the existing models for better accuracy and performance.
-- [ ] Develop and integrate a first-lap and overtaking model.
+- [ ] Develop and integrate a starting grid, first-lap and overtaking model.
 

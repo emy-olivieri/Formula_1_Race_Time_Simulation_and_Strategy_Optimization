@@ -1,418 +1,241 @@
+import logging
+from typing import Dict, Any
+
 import numpy as np
-from rich.progress import Progress
 import pandas as pd
 import matplotlib.pyplot as plt
-from run import Run
+from rich.progress import Progress
+
 from data_loader import DataLoader
+from run import Run
 from spearman_evaluation import SpearmanEvaluation
+from rmse_evaluation import RMSEEvaluation
 from wilcoxon_evaluation import WilcoxonEvaluation
 
 
 class MonteCarloSimulator:
     """
     Monte Carlo Simulation for F1 race modeling.
-    Runs multiple simulations to assess variability in race outcomes
-    and compare simulated outcomes with actual race results.
+    Runs multiple simulations, compares with real results, evaluates
+    statistics, and plots outcomes.
     """
-    def __init__(self, season, gp_location, db_path, driver_strategies, num_simulations=1000,test=False):
-        """
-        Initialize the Monte Carlo simulator.
 
+    def __init__(
+        self,
+        season: int,
+        gp_location: str,
+        db_path: str,
+        driver_strategies: Dict[str, Dict[int, Any]],
+        num_simulations: int = 1000,
+        test_mode: bool = False,
+        starting_grid: list[tuple[int,int]] | None = None,
+        verbose: bool = True,
+    ) -> None:
+        """
         Args:
-            season (int): The racing season (year).
-            gp_location (str): Grand Prix location.
-            db_path (str): Path to the SQLite database.
-            driver_strategies (dict): Strategies for each driver.
-            num_simulations (int): Number of Monte Carlo iterations.
+            season: F1  season year.
+            gp_location: GP location.
+            db_path: SQLite database path.
+            driver_strategies: Dict mapping driver names to pit strategies.
+            num_simulations: Number of Monte Carlo runs.
+            test_mode: Use deterministic events from the real race if True.
+            verbose: Enable INFO logging if True.
         """
         self.season = season
-        self.test=test
-        self.driver_strategies = driver_strategies
         self.gp_location = gp_location
-        self.num_simulations = num_simulations
         self.db_path = db_path
-        self.data_loader = DataLoader(db_path=self.db_path)
-        self.dataframes = self.data_loader.load_data()
-        self.results = []
+        self.driver_strategies = driver_strategies
+        self.num_simulations = num_simulations
+        self.test_mode = test_mode
+
+        self.starting_grid = starting_grid
+
+        # Load data once
+        loader = DataLoader(db_path=self.db_path)
+        self.dataframes = loader.load_data()
+
+        # Placeholders for results
+        self.results = []  # type: list[pd.DataFrame]
         self.final_outcomes = pd.DataFrame()
         self.comparison_df = pd.DataFrame()
 
-    def run_simulation(self):
-        """
-        Runs multiple race simulations and stores the final outcomes.
-        """
+        # Logger configuration
+        self.logger = logging.getLogger(f"MCSim.{self.gp_location}")
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            fmt = "[%(levelname)s] %(name)s: %(message)s"
+            handler.setFormatter(logging.Formatter(fmt))
+            self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO if verbose else logging.WARNING)
+
+    def run_simulation(self) -> None:
+        """Run the Monte Carlo simulations and aggregate outcomes."""
+        self.logger.info(
+            "Simulating %d races for %s %d",
+            self.num_simulations, self.gp_location, self.season
+        )
+
+        # Clear previous results
+        self.results.clear()
+
         with Progress() as progress:
-            task = progress.add_task("[cyan]Running simulations...", total=self.num_simulations)
-        
+            task = progress.add_task(
+                "[cyan]Running simulations...", total=self.num_simulations
+            )
             for _ in range(self.num_simulations):
-                race_run = Run(
+                sim = Run(
                     season=self.season,
                     gp_location=self.gp_location,
                     dataframes=self.dataframes,
                     driver_strategies=self.driver_strategies,
-                    test=self.test
+                    test_mode=self.test_mode,
+                    starting_grid=self.starting_grid,
                 )
-                race_run.run()
-                self.results.append(race_run.outcomes.copy())
-                progress.update(task, advance=1)  # Increment progress bar
-        
+                sim.run()
+                self.results.append(sim.outcomes)
+                progress.update(task, advance=1)
+
         self.final_outcomes = pd.concat(self.results, ignore_index=True)
-    def compare_outcomes(self):
+        self.logger.info("Simulations completed.")
+
+    def compare_outcomes(self) -> pd.DataFrame:
         """
-        Compare simulated race results with actual results.
+        Compare simulated averages to actual race results.
 
         Returns:
-            DataFrame: Contains comparison of simulated and actual positions and times.
+            DataFrame with columns:
+                driver_id,
+                final_position_sim,
+                cumulative_time_sim,
+                final_position_actual,
+                cumulative_time_actual
         """
         if self.final_outcomes.empty:
-            print("No simulated outcomes available.")
+            self.logger.error("No simulation data to compare.")
             return pd.DataFrame()
 
-        if "starterfields" not in self.dataframes or "laps" not in self.dataframes:
-            print("Missing required race data.")
+        races = self.dataframes["races"]
+        race = races[
+            (races["season"] == self.season)
+            & (races["location"] == self.gp_location)
+        ]
+        if race.empty:
+            self.logger.error("Race not found in data.")
             return pd.DataFrame()
+        race_id = int(race["id"].iloc[0])
 
-        # Get the race_id of the current GP
-        races_df = self.dataframes["races"]
-        race_row = races_df[(races_df["season"] == self.season) & (races_df["location"] == self.gp_location)]
-        if race_row.empty:
-            print("No race found for the specified season and location.")
-            return pd.DataFrame()
-        race_id = race_row["id"].iloc[0]
+        # Simulated averages
+        sim_df = (
+            self.final_outcomes
+            .groupby("driver_id", as_index=False)
+            .agg(
+                final_position_sim=("final_position", "mean"),
+                cumulative_time_sim=("cumulative_time", "mean"),
+            )
+        )
 
-        # Simulated results: calculate the average outcomes over the simulations.
-        sim_outcomes = self.final_outcomes.groupby("driver_id").agg({
-            "final_position": "mean",
-            "cumulative_time": "mean"
-        }).reset_index().rename(columns={
-            "final_position": "final_position_sim",
-            "cumulative_time": "cumulative_time_sim"
-        })
+        # Actual positions
+        sf = self.dataframes["starterfields"]
+        actual_pos = (
+            sf[sf["race_id"] == race_id]
+            .rename(columns={"resultposition": "final_position_actual"})
+            [["driver_id", "final_position_actual"]]
+        )
 
-        # Actual results
-        actual_outcomes = self.dataframes["starterfields"]
-        actual_outcomes = actual_outcomes[actual_outcomes["race_id"] == race_id]
-        actual_outcomes = actual_outcomes.rename(columns={"resultposition": "final_position_actual"})
-        actual_outcomes = actual_outcomes[["driver_id", "final_position_actual"]]
+        # Actual cumulative times
+        laps = self.dataframes["laps"]
+        last_laps = (
+            laps[laps["race_id"] == race_id]
+            .groupby("driver_id", as_index=False)["lapno"]
+            .max()
+        )
+        actual_time = (
+            laps[laps["race_id"] == race_id]
+            .merge(last_laps, on=["driver_id", "lapno"], how="inner")
+            .rename(columns={"racetime": "cumulative_time_actual"})
+            [["driver_id", "cumulative_time_actual"]]
+        )
 
-        # Actual lap times from `laps` table
-        laps_df = self.dataframes["laps"]
-        last_laps = laps_df[laps_df["race_id"] == race_id].groupby("driver_id")["lapno"].max().reset_index()
-        final_times = pd.merge(
-            laps_df[laps_df["race_id"] == race_id],
-            last_laps,
-            on=["driver_id", "lapno"],
-            how="inner"
-        )[["driver_id", "racetime"]]
-        final_times = final_times.rename(columns={"racetime": "cumulative_time_actual"})
-
-        # Merge all data
-        self.comparison_df = pd.merge(sim_outcomes, actual_outcomes, on="driver_id", how="inner")
-        self.comparison_df = pd.merge(self.comparison_df, final_times, on="driver_id", how="inner")
-        self.comparison_df = self.comparison_df.sort_values(by=["final_position_sim"])
+        # Merge
+        self.comparison_df = (
+            sim_df
+            .merge(actual_pos,   on="driver_id", how="right")
+            .merge(actual_time,  on="driver_id", how="right")
+            .sort_values("final_position_sim")
+            .reset_index(drop=True)
+        )
+        self.logger.info("Comparison DataFrame is ready.")
         return self.comparison_df
 
-    def plot_results(self):
+    def evaluate_statistics(self) -> Dict[str, Any]:
         """
-        Plots the mean final positions and cumulative times.
-        
-        Args:
-            mean_results (DataFrame): DataFrame containing driver_id, mean final position, and mean cumulative time.
+        Perform Wilcoxon and Spearman tests.
+
+        Returns:
+            Dict with keys 'wilcoxon' and 'spearman' mapping to test results.
         """
-        print("Comparaison des résultats moyens issus des simulations Monte Carlo et des réels:")
-        
-        print(self.comparison_df)
-        
-        # Create a plot with two y-axes
-        fig, ax1 = plt.subplots(figsize=(10, 6))
-        
-        # Bar plot for the average final positions
-        ax1.bar(self.comparison_df['driver_id'], self.comparison_df['final_position_sim'], color='blue', alpha=0.7)
-        ax1.set_xlabel("Driver ID")
-        ax1.set_ylabel("Position finale moyenne", color='blue')
-        ax1.tick_params(axis='y', labelcolor='blue')
-        ax1.set_title("Simulations Monte Carlo: Positions finales et temps cumulé moyens")
-        plt.xticks(rotation=90)
-        
-        # Second y-axis for the average cumulative times
-        ax2 = ax1.twinx()
-        ax2.scatter(self.comparison_df['driver_id'], self.comparison_df['cumulative_time_sim'], color='red', marker='o', linestyle='--')
-        ax2.set_ylabel("Temps cumulé moyen", color='red')
-        ax2.tick_params(axis='y', labelcolor='red')
-        
-        plt.tight_layout()
+        if self.comparison_df.empty:
+            self.logger.error("No comparison data for statistical tests.")
+            return {}
+
+        self.logger.info("Running RMSE ...")
+        rmse_res = RMSEEvaluation(
+            actual_data=self.comparison_df["cumulative_time_actual"],
+            simulated_data=self.comparison_df["cumulative_time_sim"],
+        ).evaluate()
+
+        self.logger.info("Running Wilcoxon test...")
+        wil_res = WilcoxonEvaluation(
+            actual_data=self.comparison_df["cumulative_time_actual"],
+            simulated_data=self.comparison_df["cumulative_time_sim"],
+        ).evaluate()
+
+        self.logger.info("Running Spearman correlation...")
+        spr_res = SpearmanEvaluation(
+            actual_data=self.comparison_df["final_position_actual"],
+            simulated_data=self.comparison_df["final_position_sim"],
+        ).evaluate()
+
+        return {"wilcoxon": wil_res, "RMSE": rmse_res, "spearman": spr_res}
+
+    def plot_results(self) -> None:
+        """
+        Plot the results of the simulations and comparisons."""
+        df = self.comparison_df
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+        ax1.scatter(df["cumulative_time_actual"], df["cumulative_time_sim"])
+        max_val = max(df["cumulative_time_actual"].max(), df["cumulative_time_sim"].max())
+        ax1.plot([0, max_val], [0, max_val], linestyle="--")
+        ax1.set_xlabel("Cumulative Time Actual")
+        ax1.set_ylabel("Cumulative Time Simulated")
+        ax1.set_title("Simulated vs Actual Cumulative Times")
+
+        drivers = df["driver_id"].astype(str)
+        x = np.arange(len(drivers))
+        width = 0.35
+        ax2.bar(x - width/2, df["final_position_actual"], width, label="Actual")
+        ax2.bar(x + width/2, df["final_position_sim"], width, label="Simulated")
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(drivers, rotation=90)
+        ax2.set_ylabel("Position")
+        ax2.set_title("Actual vs Simulated Positions")
+        ax2.legend()
+
+        fig.tight_layout()
         plt.show()
 
-    def summarize(self):
+    def summarize(self) -> Dict[str, Any]:
         """
-        Summarizes simulation results, compares outcomes, and performs statistical tests.
-        Also plots the simulation outcomes.
+        Full pipeline: compare outcomes, evaluate stats, plot.
+        
+        Returns:
+            Statistical test results dict.
         """
-        self.compare_outcomes()  
+        self.compare_outcomes()
+        # stats = self.evaluate_statistics()
+        # self.plot_results()
+        # return stats
+        return
 
-        if self.comparison_df.empty:
-            print("\nNo actual race results available for comparison.")
-            return
-
-        # Ensure required columns exist
-        required_columns = {"final_position_actual", "final_position_sim", "cumulative_time_actual", "cumulative_time_sim"}
-        if not required_columns.issubset(self.comparison_df.columns):
-            print("\nMissing required columns for evaluation. Check `compare_outcomes()`.")
-            return
-
-        # Run Wilcoxon test on race times
-        print("\n=== Wilcoxon Test for Lap Times ===")
-        wilcoxon_eval = WilcoxonEvaluation(
-            actual_data=self.comparison_df["cumulative_time_actual"],
-            simulated_data=self.comparison_df["cumulative_time_sim"]
-        )
-        wilcoxon_eval.evaluate()
-
-        # Run Spearman Rank test for positions
-        print("\n=== Spearman Rank Correlation for Positions ===")
-        spearman_eval = SpearmanEvaluation(
-            actual_data=self.comparison_df["final_position_actual"],
-            simulated_data=self.comparison_df["final_position_sim"]
-        )
-        spearman_eval.evaluate()
-        
-        # Compute mean simulation results for plotting
-        # Here we use the aggregated simulated outcomes already computed in compare_outcomes
-        mean_results = self.comparison_df[['driver_id', 'final_position_sim', 'cumulative_time_sim']].rename(
-            columns={'final_position_sim': 'final_position', 'cumulative_time_sim': 'cumulative_time'}
-        )
-        
-        # Call the new function to plot the results
-        self.plot_results()
-        
-        return 
-    
-
-if __name__ == "__main__":
-    db_path = "F1_timingdata_2014_2019.sqlite"
-    season = 2016
-    gp_location = "Austin"
-    num_simulations = 2
-
-    driver_strategies = {
-        'Lewis Hamilton': {'starting_compound': 'A3',
-                           'starting_tire_age': 2,
-                           1: {'compound': 'A3',
-                               'pitstop_interval': [11, 11],
-                               'pit_stop_lap': 11,
-                               'tire_age': 13},
-                           2: {'compound': 'A3',
-                               'pitstop_interval': [31, 31],
-                               'pit_stop_lap': 31,
-                               'tire_age': 20}},
-        'Nico Rosberg': {'starting_compound': 'A3',
-                         'starting_tire_age': 2,
-                         1: {'compound': 'A3',
-                             'pitstop_interval': [10, 10],
-                             'pit_stop_lap': 10,
-                             'tire_age': 12},
-                         2: {'compound': 'A2',
-                             'pitstop_interval': [31, 31],
-                             'pit_stop_lap': 31,
-                             'tire_age': 21}},
-        'Daniel Ricciardo': {'starting_compound': 'A4',
-                             'starting_tire_age': 2,
-                             1: {'compound': 'A4',
-                                 'pitstop_interval': [8, 8],
-                                 'pit_stop_lap': 8,
-                                 'tire_age': 10},
-                             2: {'compound': 'A3',
-                                 'pitstop_interval': [25, 25],
-                                 'pit_stop_lap': 25,
-                                 'tire_age': 17}},
-        'Max Verstappen': {'starting_compound': 'A3',
-                           'starting_tire_age': 2,
-                           1: {'compound': 'A3',
-                               'pitstop_interval': [9, 9],
-                               'pit_stop_lap': 9,
-                               'tire_age': 11},
-                           2: {'compound': 'A3',
-                               'pitstop_interval': [26, 26],
-                               'pit_stop_lap': 26,
-                               'tire_age': 17}},
-        'Kimi Raikkonen': {'starting_compound': 'A4',
-                           'starting_tire_age': 2,
-                           1: {'compound': 'A4',
-                               'pitstop_interval': [8, 8],
-                               'pit_stop_lap': 8,
-                               'tire_age': 10},
-                           2: {'compound': 'A3',
-                               'pitstop_interval': [24, 24],
-                               'pit_stop_lap': 24,
-                               'tire_age': 16},
-                           3: {'compound': 'A4',
-                               'pitstop_interval': [38, 38],
-                               'pit_stop_lap': 38,
-                               'tire_age': 14}},
-        'Sebastian Vettel': {'starting_compound': 'A4',
-                             'starting_tire_age': 2,
-                             1: {'compound': 'A4',
-                                 'pitstop_interval': [14, 14],
-                                 'pit_stop_lap': 14,
-                                 'tire_age': 16},
-                             2: {'compound': 'A3',
-                                 'pitstop_interval': [29, 29],
-                                 'pit_stop_lap': 29,
-                                 'tire_age': 15},
-                             3: {'compound': 'A2',
-                                 'pitstop_interval': [53, 53],
-                                 'pit_stop_lap': 53,
-                                 'tire_age': 24}},
-        'Nico Hulkenberg': {'starting_compound': 'A4', 'starting_tire_age': 2},
-        'Valtteri Bottas': {'starting_compound': 'A4',
-                            'starting_tire_age': 2,
-                            1: {'compound': 'A4',
-                                'pitstop_interval': [1, 1],
-                                'pit_stop_lap': 1,
-                                'tire_age': 3},
-                            2: {'compound': 'A3',
-                                'pitstop_interval': [20, 20],
-                                'pit_stop_lap': 20,
-                                'tire_age': 19}},
-        'Felipe Massa': {'starting_compound': 'A4',
-                         'starting_tire_age': 2,
-                         1: {'compound': 'A4',
-                             'pitstop_interval': [11, 11],
-                             'pit_stop_lap': 11,
-                             'tire_age': 13},
-                         2: {'compound': 'A3',
-                             'pitstop_interval': [29, 29],
-                             'pit_stop_lap': 29,
-                             'tire_age': 18},
-                         3: {'compound': 'A2',
-                             'pitstop_interval': [54, 54],
-                             'pit_stop_lap': 54,
-                             'tire_age': 25}},
-        'Carlos Sainz Jnr': {'starting_compound': 'A4',
-                             'starting_tire_age': 2,
-                             1: {'compound': 'A4',
-                                 'pitstop_interval': [11, 11],
-                                 'pit_stop_lap': 11,
-                                 'tire_age': 13},
-                             2: {'compound': 'A3',
-                                 'pitstop_interval': [30, 30],
-                                 'pit_stop_lap': 30,
-                                 'tire_age': 19}},
-        'Sergio Perez': {'starting_compound': 'A4',
-                         'starting_tire_age': 0,
-                         1: {'compound': 'A4',
-                             'pitstop_interval': [10, 10],
-                             'pit_stop_lap': 10,
-                             'tire_age': 10},
-                         2: {'compound': 'A2',
-                             'pitstop_interval': [27, 27],
-                             'pit_stop_lap': 27,
-                             'tire_age': 17}},
-        'Fernando Alonso': {'starting_compound': 'A3',
-                            'starting_tire_age': 0,
-                            1: {'compound': 'A3',
-                                'pitstop_interval': [11, 11],
-                                'pit_stop_lap': 11,
-                                'tire_age': 11},
-                            2: {'compound': 'A2',
-                                'pitstop_interval': [30, 30],
-                                'pit_stop_lap': 30,
-                                'tire_age': 19}},
-        'Daniil Kvyat': {'starting_compound': 'A3',
-                         'starting_tire_age': 0,
-                         1: {'compound': 'A3',
-                             'pitstop_interval': [21, 21],
-                             'pit_stop_lap': 21,
-                             'tire_age': 21}},
-        'Esteban Gutierrez': {'starting_compound': 'A3',
-                              'starting_tire_age': 0,
-                              1: {'compound': 'A3',
-                                  'pitstop_interval': [13, 13],
-                                  'pit_stop_lap': 13,
-                                  'tire_age': 13}},
-        'Jolyon Palmer': {'starting_compound': 'A3',
-                          'starting_tire_age': 0,
-                          1: {'compound': 'A3',
-                              'pitstop_interval': [15, 15],
-                              'pit_stop_lap': 15,
-                              'tire_age': 15},
-                          2: {'compound': 'A3',
-                              'pitstop_interval': [26, 26],
-                              'pit_stop_lap': 26,
-                              'tire_age': 11}},
-        'Marcus Ericsson': {'starting_compound': 'A3',
-                            'starting_tire_age': 0,
-                            1: {'compound': 'A3',
-                                'pitstop_interval': [17, 17],
-                                'pit_stop_lap': 17,
-                                'tire_age': 17}},
-        'Romain Grosjean': {'starting_compound': 'A4',
-                            'starting_tire_age': 0,
-                            1: {'compound': 'A4',
-                                'pitstop_interval': [10, 10],
-                                'pit_stop_lap': 10,
-                                'tire_age': 10},
-                            2: {'compound': 'A3',
-                                'pitstop_interval': [27, 27],
-                                'pit_stop_lap': 27,
-                                'tire_age': 17}},
-        'Kevin Magnussen': {'starting_compound': 'A3',
-                            'starting_tire_age': 0,
-                            1: {'compound': 'A3',
-                                'pitstop_interval': [13, 13],
-                                'pit_stop_lap': 13,
-                                'tire_age': 13},
-                            2: {'compound': 'A3',
-                                'pitstop_interval': [27, 27],
-                                'pit_stop_lap': 27,
-                                'tire_age': 14},
-                            3: {'compound': 'A2',
-                                'pitstop_interval': [43, 43],
-                                'pit_stop_lap': 43,
-                                'tire_age': 16}},
-        'Jenson Button': {'starting_compound': 'A4',
-                          'starting_tire_age': 0,
-                          1: {'compound': 'A4',
-                              'pitstop_interval': [10, 10],
-                              'pit_stop_lap': 10,
-                              'tire_age': 10},
-                          2: {'compound': 'A2',
-                              'pitstop_interval': [28, 28],
-                              'pit_stop_lap': 28,
-                              'tire_age': 18}},
-        'Pascal Wehrlein': {'starting_compound': 'A3',
-                            'starting_tire_age': 0,
-                            1: {'compound': 'A3',
-                                'pitstop_interval': [13, 13],
-                                'pit_stop_lap': 13,
-                                'tire_age': 13},
-                            2: {'compound': 'A2',
-                                'pitstop_interval': [30, 30],
-                                'pit_stop_lap': 30,
-                                'tire_age': 17}},
-        'Felipe Nasr': {'starting_compound': 'A2',
-                        'starting_tire_age': 0,
-                        1: {'compound': 'A2',
-                            'pitstop_interval': [29, 29],
-                            'pit_stop_lap': 29,
-                            'tire_age': 29}},
-        'Esteban Ocon': {'starting_compound': 'A2',
-                         'starting_tire_age': 0,
-                         1: {'compound': 'A2',
-                             'pitstop_interval': [17, 17],
-                             'pit_stop_lap': 17,
-                             'tire_age': 17},
-                         2: {'compound': 'A3',
-                             'pitstop_interval': [26, 26],
-                             'pit_stop_lap': 26,
-                             'tire_age': 9},
-                         3: {'compound': 'A3',
-                             'pitstop_interval': [44, 44],
-                             'pit_stop_lap': 44,
-                             'tire_age': 18}}
-        }
-    
-    
-    simulator = MonteCarloSimulator(season, gp_location, db_path, driver_strategies, num_simulations)
-    simulator.run_simulation()
-    simulator.summarize()

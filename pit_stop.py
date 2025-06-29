@@ -45,7 +45,7 @@ class PitStop:
             (df_merged["season"] == self.season) &
             (df_merged["race_id"] < self.race_id) &
             (df_merged["pitstopduration"].notna()) &
-            (df_merged["pitstopduration"] < 700)
+            (df_merged["pitstopduration"] < 400)  # Exclure les valeurs aberrantes
         ].copy()
         df_filtered["pitstop_diff"] = df_filtered["pitstopduration"] - self.avg_min_pit_stop_duration
         shape, loc, scale = fisk.fit(df_filtered["pitstop_diff"])
